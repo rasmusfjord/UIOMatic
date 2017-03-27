@@ -205,7 +205,122 @@ namespace UIOMatic.Controllers
             result.Items = items;
             return result;
         }
+        public UIOMaticPagedResult GetPaged(string typeName,int nodeId, string nodeIdField, int itemsPerPage, int pageNumber, string sortColumn,
+          string sortOrder, string searchTerm)
+        {
+            var currentType = Type.GetType(typeName);
+            var tableName = (TableNameAttribute)Attribute.GetCustomAttribute(currentType, typeof(TableNameAttribute));
+            var uioMaticAttri = (UIOMaticAttribute)Attribute.GetCustomAttribute(currentType, typeof(UIOMaticAttribute));
 
+            var db = (Database)DatabaseContext.Database;
+            if (!string.IsNullOrEmpty(uioMaticAttri.ConnectionStringName))
+                db = new Database(uioMaticAttri.ConnectionStringName);
+
+            var query = new Sql().Select("*").From(tableName.Value);
+
+            EventHandler<QueryEventArgs> tmp = BuildingQuery;
+            if (tmp != null)
+                tmp(this, new QueryEventArgs(currentType, tableName.Value, query, sortColumn, sortOrder, searchTerm));
+
+            if (!string.IsNullOrEmpty(searchTerm))
+            {
+                int c = 0;
+                foreach (var property in currentType.GetProperties())
+                {
+                    var attris = property.GetCustomAttributes();
+
+                    if (!attris.Any(x => x.GetType() == typeof(IgnoreAttribute)))
+                    {
+                        string before = "WHERE";
+                        if (c > 0)
+                            before = "OR";
+
+                        var columnAttri =
+                           attris.Where(x => x.GetType() == typeof(ColumnAttribute));
+
+                        var columnName = property.Name;
+                        if (columnAttri.Any())
+                            columnName = ((ColumnAttribute)columnAttri.FirstOrDefault()).Name;
+
+                        query.Append(before + " [" + columnName + "] like @0", "%" + searchTerm + "%");
+                        c++;
+
+                    }
+                }
+            }
+
+            query.Append(" Where " + nodeIdField + "=" + nodeId);
+            if (!string.IsNullOrEmpty(sortColumn) && !string.IsNullOrEmpty(sortOrder))
+                query.OrderBy(sortColumn + " " + sortOrder);
+            else if (!string.IsNullOrEmpty(uioMaticAttri.SortColumn) && !string.IsNullOrEmpty(uioMaticAttri.SortOrder))
+            {
+                query.OrderBy(uioMaticAttri.SortColumn + " " + uioMaticAttri.SortOrder);
+            }
+            
+
+            else
+            {
+                var primaryKeyColum = "id";
+
+                var primKeyAttri = currentType.GetCustomAttributes().Where(x => x.GetType() == typeof(PrimaryKeyAttribute));
+                if (primKeyAttri.Any())
+                    primaryKeyColum = ((PrimaryKeyAttribute)primKeyAttri.First()).Value;
+
+                foreach (var property in currentType.GetProperties())
+                {
+                    var keyAttri = property.GetCustomAttributes().Where(x => x.GetType() == typeof(PrimaryKeyColumnAttribute));
+                    if (keyAttri.Any())
+                        primaryKeyColum = property.Name;
+                }
+
+                query.OrderBy(primaryKeyColum + " asc");
+            }
+
+            var temp = BuildedQuery;
+            var qea = new QueryEventArgs(currentType, tableName.Value, query, sortColumn, sortOrder, searchTerm);
+            if (temp != null)
+                temp(this, qea);
+
+            var p = db.Page<dynamic>(pageNumber, itemsPerPage, qea.Query);
+            var result = new UIOMaticPagedResult
+            {
+                CurrentPage = p.CurrentPage,
+                ItemsPerPage = p.ItemsPerPage,
+                TotalItems = p.TotalItems,
+                TotalPages = p.TotalPages
+            };
+            var items = new List<object>();
+
+            foreach (dynamic item in p.Items)
+            {
+                // get settable public properties of the type
+                var props = currentType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(x => x.GetSetMethod() != null);
+
+                // create an instance of the type
+                var obj = Activator.CreateInstance(currentType);
+
+
+                // set property values using reflection
+                var values = (IDictionary<string, object>)item;
+                foreach (var prop in props)
+                {
+                    var columnAttri =
+                           prop.GetCustomAttributes().Where(x => x.GetType() == typeof(ColumnAttribute));
+
+                    var propName = prop.Name;
+                    if (columnAttri.Any())
+                        propName = ((ColumnAttribute)columnAttri.FirstOrDefault()).Name;
+
+                    if (values.ContainsKey(propName))
+                        prop.SetValue(obj, values[propName]);
+                }
+
+                items.Add(obj);
+            }
+            result.Items = items;
+            return result;
+        }
         public IEnumerable<UIOMaticPropertyInfo> GetAllProperties(string typeName, bool includeIgnored = false)
         {
             var ar = typeName.Split(',');

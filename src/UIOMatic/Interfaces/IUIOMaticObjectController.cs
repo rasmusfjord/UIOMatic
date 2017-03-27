@@ -18,7 +18,8 @@ namespace UIOMatic.Interfaces
 
         UIOMaticPagedResult GetPaged(string typeName, int itemsPerPage, int pageNumber, string sortColumn,
             string sortOrder, string searchTerm);
-
+        UIOMaticPagedResult GetPaged(string typeName,int nodeId, string nodeIdField, int itemsPerPage, int pageNumber, string sortColumn,
+        string sortOrder, string searchTerm);
         IEnumerable<UIOMaticPropertyInfo> GetAllProperties(string typeName, bool includeIgnored = false);
 
         IEnumerable<string> GetAllColumns(string typeName);
